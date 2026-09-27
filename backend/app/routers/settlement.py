@@ -1,8 +1,6 @@
 """经费结算接口：维护结算单，覆盖提交审核、确认付款、驳回结算等动作。"""
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas import ActionResult, EntryPayload, PageResult
@@ -23,11 +21,29 @@ def list_entries(
     page: int = 1,
     size: int = 20,
 ) -> PageResult[dict]:
-    """按结算单号与状态过滤经费结算列表；没有数据时返回空页，不报错。"""
+    """按结算单号与状态过滤经费结算列表；没有数据时返回空页，不报错。
+
+    金额列全部由统一金额口径派生，未付金额、结算状态与统计接口天然一致。
+    """
     if size > 200:
         raise HTTPException(status_code=400, detail="每页最多 200 条，请缩小分页范围")
     items, total = service.list_entries(keyword=keyword, status=status, page=page, size=size)
     return PageResult(items=items, total=total, page=page, size=size)
+
+
+@router.get("/stats")
+def stats(
+    keyword: str | None = Query(default=None, description="与列表一致：按结算单号检索"),
+    status: str | None = Query(default=None, description="与列表一致：按状态过滤"),
+) -> dict:
+    """统计卡片：与列表共用同一份过滤结果和金额算法，返回后直接对账即可。"""
+    return service.stats(keyword=keyword, status=status)
+
+
+@router.get("/export")
+def export_entries() -> dict:
+    """导出对账文件：金额数值、展示文本、合计都与列表/统计同源同口径。"""
+    return service.export_entries()
 
 
 @router.get("/{entry_id}", response_model=dict)
@@ -56,10 +72,3 @@ def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出经费结算清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "settlement", "total": total, "items": items}
